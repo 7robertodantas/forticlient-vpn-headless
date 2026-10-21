@@ -1,4 +1,4 @@
-package fcctl
+package fcvpn
 
 import (
 	"fmt"

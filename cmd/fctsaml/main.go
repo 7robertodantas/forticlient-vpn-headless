@@ -9,12 +9,12 @@ import (
 	"strings"
 	"syscall"
 
-	"fcctl"
-	"fcctl/pkg/config"
-	"fcctl/pkg/service"
-	"fcctl/pkg/saml"
-	"fcctl/pkg/ws"
-	"fcctl/pkg/xml"
+	"fcvpn"
+	"fcvpn/pkg/config"
+	"fcvpn/pkg/service"
+	"fcvpn/pkg/saml"
+	"fcvpn/pkg/ws"
+	"fcvpn/pkg/xml"
 )
 
 func main() {
@@ -47,7 +47,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: fcctl <command> [arguments]
+	fmt.Fprintf(os.Stderr, `Usage: fcvpn <command> [arguments]
 
 Commands:
   import <file.xml>     Import a FortiClient VPN configuration file
@@ -57,16 +57,16 @@ Commands:
   list                  List configured VPN tunnels
 
 Examples:
-  fcctl import ~/MyCorp_Corp_VPN_North_Linux_READY.xml
-  fcctl connect "MyCorp Corp VPN North"
-  fcctl list
-  fcctl status
+  fcvpn import ~/MyCorp_Corp_VPN_North_Linux_READY.xml
+  fcvpn connect "MyCorp Corp VPN North"
+  fcvpn list
+  fcvpn status
 `)
 }
 
 func runImport(ctx context.Context, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: fcctl import <file.xml>")
+		return fmt.Errorf("usage: fcvpn import <file.xml>")
 	}
 	file := args[0]
 
@@ -189,18 +189,18 @@ func runConnect(ctx context.Context, args []string) error {
 			return ctx.Err()
 		case msg := <-client.ReceiveAll(ctx):
 			switch msg.Type {
-			case fcctl.FCT_VPN_CONNECTED:
+			case fcvpn.FCT_VPN_CONNECTED:
 				fmt.Println("\n✓ VPN connected successfully!")
 				return nil
-			case fcctl.FCT_VPN_DISCONNECTED:
+			case fcvpn.FCT_VPN_DISCONNECTED:
 				fmt.Println("\n✗ VPN disconnected")
-				return fcctl.ErrNoConnection
-			case fcctl.FCT_VPN_CONNECTING:
+				return fcvpn.ErrNoConnection
+			case fcvpn.FCT_VPN_CONNECTING:
 				fmt.Println("  Connecting...")
-			case fcctl.FCT_VPN_SAML_RESPONSE:
+			case fcvpn.FCT_VPN_SAML_RESPONSE:
 				// SAML response processed
 				fmt.Println("  SAML response received")
-			case fcctl.FCT_VPN_XAUTH:
+			case fcvpn.FCT_VPN_XAUTH:
 				// XAuth challenge - not expected with SAML
 				fmt.Println("  XAuth challenge received (unexpected)")
 			default:
@@ -262,7 +262,7 @@ func startSAMLAuth(ctx context.Context, client *ws.Client, conn *xml.Connection)
 		return fmt.Errorf("SAML wait: %w", err)
 	}
 
-	if result.State != fcctl.SAMLStateSuccess {
+	if result.State != fcvpn.SAMLStateSuccess {
 		return fmt.Errorf("SAML authentication failed (state: %d)", result.State)
 	}
 
@@ -283,7 +283,7 @@ func runDisconnect(ctx context.Context, args []string) error {
 		tunnelName = args[0]
 	}
 
-	port, err := fcctl.PortReader{}.Read()
+	port, err := fcvpn.PortReader{}.Read()
 	if err != nil {
 		return err
 	}
@@ -307,7 +307,7 @@ func runDisconnect(ctx context.Context, args []string) error {
 }
 
 func runStatus(ctx context.Context, args []string) error {
-	port, err := fcctl.PortReader{}.Read()
+	port, err := fcvpn.PortReader{}.Read()
 	if err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func runStatus(ctx context.Context, args []string) error {
 }
 
 func runList(ctx context.Context) error {
-	port, err := fcctl.PortReader{}.Read()
+	port, err := fcvpn.PortReader{}.Read()
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func runList(ctx context.Context) error {
 
 	if len(conns) == 0 {
 		fmt.Println("No VPN configurations found.")
-		fmt.Println("Import one with: fcctl import <file.xml>")
+		fmt.Println("Import one with: fcvpn import <file.xml>")
 		return nil
 	}
 

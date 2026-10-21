@@ -1,4 +1,4 @@
-module fcctl
+module fcvpn
 
 go 1.25.4
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"fcctl/pkg/xml"
+	"fcvpn/pkg/xml"
 )
 
 // Handler communicates with the confighandler service via its HTTP API.

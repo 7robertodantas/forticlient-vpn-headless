@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"fcctl"
+	"fcvpn"
 )
 
 // Manager handles starting/stopping FortiClient background services.
@@ -33,17 +33,17 @@ func (m *Manager) StartAll(ctx context.Context) (string, error) {
 	defer m.mu.Unlock()
 
 	// Start fctsched (scheduler)
-	if err := m.startService(ctx, "fctsched", fcctl.BinFctsched); err != nil {
+	if err := m.startService(ctx, "fctsched", fcvpn.BinFctsched); err != nil {
 		return "", fmt.Errorf("start fctsched: %w", err)
 	}
 
 	// Start confighandler (config DB + HTTP server)
-	if err := m.startService(ctx, "confighandler", fcctl.BinConfigHand); err != nil {
+	if err := m.startService(ctx, "confighandler", fcvpn.BinConfigHand); err != nil {
 		return "", fmt.Errorf("start confighandler: %w", err)
 	}
 
 	// Start fortitray (fctservice - WebSocket + IPC)
-	if err := m.startService(ctx, "fortitray", fcctl.BinFortitray); err != nil {
+	if err := m.startService(ctx, "fortitray", fcvpn.BinFortitray); err != nil {
 		return "", fmt.Errorf("start fortitray: %w", err)
 	}
 
@@ -73,15 +73,15 @@ func (m *Manager) StartRequired(ctx context.Context) (string, error) {
 	}
 
 	// Start services fresh
-	if err := m.startService(ctx, "fctsched", fcctl.BinFctsched); err != nil {
+	if err := m.startService(ctx, "fctsched", fcvpn.BinFctsched); err != nil {
 		return "", fmt.Errorf("start fctsched: %w", err)
 	}
 
-	if err := m.startService(ctx, "confighandler", fcctl.BinConfigHand); err != nil {
+	if err := m.startService(ctx, "confighandler", fcvpn.BinConfigHand); err != nil {
 		return "", fmt.Errorf("start confighandler: %w", err)
 	}
 
-	if err := m.startService(ctx, "fortitray", fcctl.BinFortitray); err != nil {
+	if err := m.startService(ctx, "fortitray", fcvpn.BinFortitray); err != nil {
 		return "", fmt.Errorf("start fortitray: %w", err)
 	}
 
@@ -133,7 +133,7 @@ func (m *Manager) Status() string {
 	}
 
 	// Check port file
-	port, err := os.ReadFile(fcctl.ServicePortPath)
+	port, err := os.ReadFile(fcvpn.ServicePortPath)
 	if err == nil && len(strings.TrimSpace(string(port))) > 0 {
 		status = append(status, fmt.Sprintf("  service_port: %s", strings.TrimSpace(string(port))))
 	} else {
@@ -151,13 +151,13 @@ func (m *Manager) isServiceAlive() bool {
 
 // getExistingPort reads the service port file without starting services.
 func (m *Manager) getExistingPort() (string, error) {
-	data, err := os.ReadFile(fcctl.ServicePortPath)
+	data, err := os.ReadFile(fcvpn.ServicePortPath)
 	if err != nil {
 		return "", err
 	}
 	port := strings.TrimSpace(string(data))
 	if port == "" {
-		return "", fcctl.ErrNoServicePort
+		return "", fcvpn.ErrNoServicePort
 	}
 	return port, nil
 }
@@ -173,7 +173,7 @@ func (m *Manager) waitForServicePort(ctx context.Context) (string, error) {
 		case <-ctx.Done():
 			return "", fmt.Errorf("timeout waiting for service port: %w", ctx.Err())
 		case <-timeout:
-			return "", fmt.Errorf("timeout waiting for service port file %s", fcctl.ServicePortPath)
+			return "", fmt.Errorf("timeout waiting for service port file %s", fcvpn.ServicePortPath)
 		case <-ticker.C:
 			port, err := m.getExistingPort()
 			if err == nil {

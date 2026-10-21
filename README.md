@@ -1,4 +1,4 @@
-# openforticlient-ipsec
+# forticlient-vpn-headless
 
 Headless CLI for FortiClient IPsec VPN with SAML authentication.
 
@@ -34,30 +34,30 @@ own `fortivpn` + `iked` binaries.
 # 1. Install FortiClient VPN (required — contains the IPsec engine)
 dpkg -i forticlient_vpn_7.4.3.5411_amd64.deb
 
-# 2. Build fcctl
-go build -o /usr/local/bin/fcctl ./cmd/fctsaml/
+# 2. Build fcvpn
+go build -o /usr/local/bin/fcvpn ./cmd/fctsaml/
 ```
 
 ### Build from source
 
 ```bash
-go build -o fcctl ./cmd/fctsaml/
+go build -o fcvpn ./cmd/fctsaml/
 ```
 
 ## Usage
 
 ```bash
 # Import XML config
-fcctl import ~/MyCorp_Corp_VPN_North_Linux_READY.xml
+fcvpn import ~/MyCorp_Corp_VPN_North_Linux_READY.xml
 
 # List configured tunnels
-fcctl list
+fcvpn list
 
 # Connect (opens browser for SAML, establishes IPsec tunnel)
-fcctl connect "MyCorp Corp VPN North"
+fcvpn connect "MyCorp Corp VPN North"
 
 # Disconnect
-fcctl disconnect
+fcvpn disconnect
 ```
 
 ## Commands
@@ -73,7 +73,7 @@ fcctl disconnect
 ## Architecture
 
 ```
-fcctl (this CLI)
+fcvpn (this CLI)
   ├── Import XML ──► confighandler (SQLite DB)
   ├── Start services ──► fctsched, confighandler, fortitray
   ├── SAML auth ──► HTTP callback server + xdg-open
@@ -91,7 +91,7 @@ uses `xdg-open` (with chromium/firefox fallback). Runs fully headless.
 ```
 .
 ├── cmd/fctsaml/main.go    # CLI entry point
-├── fcctl                  # Build output
+├── fcvpn                  # Build output
 ├── pkg/
 │   ├── config/handler.go  # Confighandler HTTP API
 │   ├── saml/server.go     # SAML HTTP callback server
