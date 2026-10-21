@@ -1,3 +1,17 @@
+// Command fcvpn is the headless FortiClient VPN CLI.
+//
+// This CLI provides a headless interface for FortiClient VPN tunnels
+// with SAML authentication support. It works on both Linux and macOS:
+//
+//   - Linux: Wraps FortiClient's fctservice HTTP API
+//   - macOS: Embeds the fctbridge service internally
+//
+// Usage:
+//   fcvpn import <file.xml>    # Import a FortiClient VPN configuration
+//   fcvpn connect [name]       # Connect to a VPN tunnel (SAML authentication)
+//   fcvpn disconnect [name]    # Disconnect from a VPN tunnel
+//   fcvpn status               # Show connection status
+//   fcvpn list                 # List configured VPN tunnels
 package main
 
 import (
@@ -9,12 +23,13 @@ import (
 	"strings"
 	"syscall"
 
-	"fcvpn"
 	"fcvpn/pkg/config"
+	"fcvpn/pkg/platform"
 	"fcvpn/pkg/service"
 	"fcvpn/pkg/saml"
 	"fcvpn/pkg/ws"
 	"fcvpn/pkg/xml"
+	"fcvpn/platforms"
 )
 
 func main() {
@@ -26,17 +41,19 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	plat := platforms.Default()
+
 	switch os.Args[1] {
 	case "import":
-		exitOnErr(runImport(ctx, os.Args[2:]))
+		exitOnErr(runImport(ctx, os.Args[2:], plat))
 	case "connect":
-		exitOnErr(runConnect(ctx, os.Args[2:]))
+		exitOnErr(runConnect(ctx, os.Args[2:], plat))
 	case "disconnect":
-		exitOnErr(runDisconnect(ctx, os.Args[2:]))
+		exitOnErr(runDisconnect(ctx, os.Args[2:], plat))
 	case "status":
-		exitOnErr(runStatus(ctx, os.Args[2:]))
+		exitOnErr(runStatus(ctx, plat))
 	case "list":
-		exitOnErr(runList(ctx))
+		exitOnErr(runList(ctx, plat))
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -49,22 +66,26 @@ func main() {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: fcvpn <command> [arguments]
 
+Headless FortiClient VPN CLI with SAML authentication.
+
+Platform: %s
+
 Commands:
   import <file.xml>     Import a FortiClient VPN configuration file
   connect [name]        Connect to a VPN tunnel (SAML authentication)
   disconnect [name]     Disconnect from a VPN tunnel
-  status [name]         Show connection status
+  status                Show connection status
   list                  List configured VPN tunnels
 
 Examples:
-  fcvpn import ~/MyCorp_Corp_VPN_North_Linux_READY.xml
-  fcvpn connect "MyCorp Corp VPN North"
+  fcvpn import ~/MyCorp_Corp_VPN_North.xml
+  fcvpn connect "MyCorp Corp VPN"
   fcvpn list
   fcvpn status
-`)
+`, platforms.CurrentOS())
 }
 
-func runImport(ctx context.Context, args []string) error {
+func runImport(ctx context.Context, args []string, plat platform.Platform) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: fcvpn import <file.xml>")
 	}
@@ -85,27 +106,28 @@ func runImport(ctx context.Context, args []string) error {
 		return fmt.Errorf("no VPN connections found in config")
 	}
 
-	// Start required services
-	mgr := service.NewManager()
+	// Start required services and get the service port
+	mgr := service.NewManager(plat)
 	port, err := mgr.StartRequired(ctx)
 	if err != nil {
 		return fmt.Errorf("start services: %w", err)
 	}
 	defer mgr.StopAll()
 
-	h := config.NewHandler(port)
+	// Create platform-specific config handler
+	h := config.NewHandler(plat, port)
 
 	imported := 0
 	for _, conn := range conns {
 		// Check if already exists
-		if _, err := h.GetConnection(conn.Name); err == nil {
+		if _, err := h.GetConnection(ctx, conn.Name); err == nil {
 			fmt.Printf("  ⚠  %s: already configured, skipping\n", conn.Name)
 			continue
 		}
 
-		// Import via confighandler API
-		if err := h.ImportConfig(data); err != nil {
-			fmt.Printf("  ✗ %s: import failed: %v (may need to restart services)\n", conn.Name, err)
+		// Import via platform-specific handler
+		if err := h.ImportConfig(ctx, data); err != nil {
+			fmt.Printf("  ✗ %s: import failed: %v\n", conn.Name, err)
 			continue
 		}
 		imported++
@@ -116,44 +138,43 @@ func runImport(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runConnect(ctx context.Context, args []string) error {
+func runConnect(ctx context.Context, args []string, plat platform.Platform) error {
 	var tunnelName string
 	if len(args) > 0 {
 		tunnelName = args[0]
 	}
 
-	// Start required services
-	mgr := service.NewManager()
+	// Start required services and get the service port
+	mgr := service.NewManager(plat)
 	port, err := mgr.StartRequired(ctx)
 	if err != nil {
 		return fmt.Errorf("start services: %w", err)
 	}
 	defer mgr.StopAll()
 
-	// Connect to fctservice
-	client := ws.NewClient(port)
-	if err := client.Connect(ctx); err != nil {
+	// Connect to fctservice via WebSocket
+	wsClient := ws.NewClient(port)
+	if err := wsClient.Connect(ctx); err != nil {
 		return fmt.Errorf("connect to fctservice: %w", err)
 	}
-	defer client.Close()
+	defer wsClient.Close()
 
 	// Find the tunnel name if not specified
 	if tunnelName == "" {
-		tunnelName, err = findTunnel(port)
+		tunnelName, err = findTunnel(plat, port)
 		if err != nil {
 			return fmt.Errorf("no tunnel specified and no default tunnel found: %w", err)
 		}
 	}
 
-	fmt.Printf("Connecting to tunnel: %s\n", tunnelName)
-
-	// Get connection details from confighandler
-	h := config.NewHandler(port)
-	conn, err := h.GetConnection(tunnelName)
+	// Get connection details from config handler
+	h := config.NewHandler(plat, port)
+	conn, err := h.GetConnection(ctx, tunnelName)
 	if err != nil {
 		return fmt.Errorf("get connection: %w", err)
 	}
 
+	fmt.Printf("Connecting to tunnel: %s\n", tunnelName)
 	fmt.Printf("  Server:       %s\n", conn.IKESettings.Server)
 	fmt.Printf("  IKE Version:  %d\n", conn.IKESettings.Version)
 	fmt.Printf("  Mode:         %s\n", conn.IKESettings.Mode)
@@ -165,7 +186,7 @@ func runConnect(ctx context.Context, args []string) error {
 		fmt.Println("Starting SAML authentication...")
 		fmt.Println()
 
-		if err := startSAMLAuth(ctx, client, conn); err != nil {
+		if err := startSAMLAuth(ctx, wsClient, conn, plat); err != nil {
 			return fmt.Errorf("SAML authentication: %w", err)
 		}
 	}
@@ -175,7 +196,7 @@ func runConnect(ctx context.Context, args []string) error {
 		ConnectionName: tunnelName,
 		Success:        true,
 	}
-	if err := client.SendConnect(req); err != nil {
+	if err := wsClient.SendConnect(req); err != nil {
 		return fmt.Errorf("send connect: %w", err)
 	}
 
@@ -185,40 +206,34 @@ func runConnect(ctx context.Context, args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			client.SendCancel()
+			wsClient.SendCancel()
 			return ctx.Err()
-		case msg := <-client.ReceiveAll(ctx):
+		case msg := <-wsClient.ReceiveAll(ctx):
 			switch msg.Type {
-			case fcvpn.FCT_VPN_CONNECTED:
+			case "FCT_VPN_CONNECTED":
 				fmt.Println("\n✓ VPN connected successfully!")
 				return nil
-			case fcvpn.FCT_VPN_DISCONNECTED:
+			case "FCT_VPN_DISCONNECTED":
 				fmt.Println("\n✗ VPN disconnected")
-				return fcvpn.ErrNoConnection
-			case fcvpn.FCT_VPN_CONNECTING:
+				return fmt.Errorf("no VPN connection established")
+			case "FCT_VPN_CONNECTING":
 				fmt.Println("  Connecting...")
-			case fcvpn.FCT_VPN_SAML_RESPONSE:
-				// SAML response processed
+			case "FCT_VPN_SAML_RESPONSE":
 				fmt.Println("  SAML response received")
-			case fcvpn.FCT_VPN_XAUTH:
-				// XAuth challenge - not expected with SAML
+			case "FCT_VPN_XAUTH":
 				fmt.Println("  XAuth challenge received (unexpected)")
 			default:
-				// Unknown message, might contain useful info
 				fmt.Printf("  Status: %s\n", msg.Type)
 			}
 		}
 	}
 }
 
-func startSAMLAuth(ctx context.Context, client *ws.Client, conn *xml.Connection) error {
-	// Build SAML URL
+func startSAMLAuth(ctx context.Context, client *ws.Client, conn *platform.Connection, plat platform.Platform) error {
 	samlPort := conn.GetSAMLPort()
-	gateway := conn.IKESettings.Server
 
 	samlServer := saml.NewServer(samlPort)
 
-	// Start SAML callback HTTP server
 	samlCtx, samlCancel := context.WithCancel(ctx)
 	defer samlCancel()
 
@@ -230,29 +245,21 @@ func startSAMLAuth(ctx context.Context, client *ws.Client, conn *xml.Connection)
 
 	fmt.Printf("  SAML callback server started on port %d\n", actualPort)
 
-	// Build the SAML URL for IPsec: https://<server>:<tcp_port>/saml_login?redirect=1&redirport=<port>
+	// Build the SAML URL for IPsec
 	tcpPort := conn.IKESettings.TCPPort
 	if tcpPort == 0 {
 		tcpPort = 443
 	}
 	samlURL := fmt.Sprintf("https://%s:%d/saml_login?redirect=1&redirport=%d",
-		gateway, tcpPort, actualPort)
+		conn.IKESettings.Server, tcpPort, actualPort)
 	fmt.Printf("  Opening browser to: %s\n", samlURL)
 	fmt.Println()
 
-	// Open external browser
-	browserCmd := exec.CommandContext(ctx, "xdg-open", samlURL)
+	// Open external browser using platform-specific command
+	browserArgs := plat.BrowserLaunch(samlURL)
+	browserCmd := exec.CommandContext(ctx, browserArgs[0], browserArgs[1:]...)
 	if err := browserCmd.Start(); err != nil {
-		// Try chromium, google-chrome, firefox as fallbacks
-		for _, browser := range []string{"chromium-browser", "google-chrome", "chromium", "firefox"} {
-			browserCmd = exec.CommandContext(ctx, browser, samlURL)
-			if err := browserCmd.Start(); err == nil {
-				break
-			}
-		}
-		if browserCmd.Process == nil {
-			return fmt.Errorf("no browser found (tried: xdg-open, chromium-browser, google-chrome, chromium, firefox)")
-		}
+		return fmt.Errorf("no browser found")
 	}
 
 	// Wait for SAML callback
@@ -262,7 +269,7 @@ func startSAMLAuth(ctx context.Context, client *ws.Client, conn *xml.Connection)
 		return fmt.Errorf("SAML wait: %w", err)
 	}
 
-	if result.State != fcvpn.SAMLStateSuccess {
+	if result.State != 1 { // SUCCESS
 		return fmt.Errorf("SAML authentication failed (state: %d)", result.State)
 	}
 
@@ -277,28 +284,30 @@ func startSAMLAuth(ctx context.Context, client *ws.Client, conn *xml.Connection)
 	return nil
 }
 
-func runDisconnect(ctx context.Context, args []string) error {
+func runDisconnect(ctx context.Context, args []string, plat platform.Platform) error {
 	tunnelName := ""
 	if len(args) > 0 {
 		tunnelName = args[0]
 	}
 
-	port, err := fcvpn.PortReader{}.Read()
+	mgr := service.NewManager(plat)
+	port, err := mgr.StartRequired(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("start services: %w", err)
 	}
+	defer mgr.StopAll()
 
-	client := ws.NewClient(port)
-	if err := client.Connect(ctx); err != nil {
+	wsClient := ws.NewClient(port)
+	if err := wsClient.Connect(ctx); err != nil {
 		return fmt.Errorf("connect to fctservice: %w", err)
 	}
-	defer client.Close()
+	defer wsClient.Close()
 
 	if tunnelName != "" {
 		fmt.Printf("Disconnecting tunnel: %s\n", tunnelName)
 	}
 
-	if err := client.SendDisconnect(); err != nil {
+	if err := wsClient.SendDisconnect(); err != nil {
 		return fmt.Errorf("send disconnect: %w", err)
 	}
 
@@ -306,40 +315,36 @@ func runDisconnect(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runStatus(ctx context.Context, args []string) error {
-	port, err := fcvpn.PortReader{}.Read()
-	if err != nil {
-		return err
-	}
+func runStatus(ctx context.Context, plat platform.Platform) error {
+	mgr := service.NewManager(plat)
 
-	h := config.NewHandler(port)
-	conns, err := h.ListConfigs()
-	if err != nil {
-		// Service might not be running, that's OK for status check
-	}
-
-	// Show service status
-	mgr := service.NewManager()
-	
 	fmt.Println("FortiClient VPN Status")
 	fmt.Println(strings.Repeat("=", 40))
 	fmt.Println(mgr.Status())
 
-	if len(conns) > 0 {
-		fmt.Printf("\nConfigured tunnels: %d\n", len(conns))
+	// Try to list configs if the service is running
+	port, err := service.GetServicePort(plat)
+	if err == nil {
+		h := config.NewHandler(plat, port)
+		conns, err := h.ListConnections(ctx)
+		if err == nil && len(conns) > 0 {
+			fmt.Printf("\nConfigured tunnels: %d\n", len(conns))
+		}
 	}
 
 	return nil
 }
 
-func runList(ctx context.Context) error {
-	port, err := fcvpn.PortReader{}.Read()
+func runList(ctx context.Context, plat platform.Platform) error {
+	port, err := service.GetServicePort(plat)
 	if err != nil {
-		return err
+		fmt.Printf("Service not running: %v\n", err)
+		fmt.Println("Import a config with: fcvpn import <file.xml>")
+		return nil
 	}
 
-	h := config.NewHandler(port)
-	conns, err := h.ListConfigs()
+	h := config.NewHandler(plat, port)
+	conns, err := h.ListConnections(ctx)
 	if err != nil {
 		return fmt.Errorf("list configs: %w", err)
 	}
@@ -356,19 +361,15 @@ func runList(ctx context.Context) error {
 		if c.HasSAML() {
 			saml = " [SAML]"
 		}
-		extBrowser := ""
-		if c.ShouldUseExternalBrowser() {
-			extBrowser = " (external browser)"
-		}
-		fmt.Printf("  %-30s %s%s%s\n", c.Name, c.IKESettings.Server, saml, extBrowser)
+		fmt.Printf("  %-30s %s%s\n", c.Name, c.IKESettings.Server, saml)
 	}
 
 	return nil
 }
 
-func findTunnel(port string) (string, error) {
-	h := config.NewHandler(port)
-	conns, err := h.ListConfigs()
+func findTunnel(plat platform.Platform, port string) (string, error) {
+	h := config.NewHandler(plat, port)
+	conns, err := h.ListConnections(context.Background())
 	if err != nil {
 		return "", err
 	}
@@ -387,7 +388,6 @@ func findTunnel(port string) (string, error) {
 		}
 	}
 
-	// Otherwise return the first one
 	return conns[0].Name, nil
 }
 

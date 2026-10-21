@@ -13,13 +13,17 @@ env:
 
 jobs:
   build:
-    name: Build fcvpn
+    name: Build
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { GOOS: linux, GOARCH: amd64, artifact: fcvpn-linux-amd64 }
           - { GOOS: linux, GOARCH: arm64, artifact: fcvpn-linux-arm64 }
+          - { GOOS: darwin, GOARCH: amd64, artifact: fcvpn-darwin-amd64 }
+          - { GOOS: darwin, GOARCH: arm64, artifact: fcvpn-darwin-arm64 }
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,17 +34,14 @@ jobs:
           go-version: "1.25.4"
           cache: true
 
-      - name: Build
+      - name: Build fcvpn
         env:
           GOOS: ${{ matrix.GOOS }}
           GOARCH: ${{ matrix.GOARCH }}
-        run: |
-          mkdir -p dist
-          go build -ldflags="-s -w" -o dist/${{ matrix.artifact }} ./cmd/fctsaml/
+        run: go build -ldflags="-s -w" -o dist/${{ matrix.artifact }} ./cmd/fcvpn/
 
       - name: Compute checksums
-        run: |
-          sha256sum dist/${{ matrix.artifact }} > dist/${{ matrix.artifact }}.sha256
+        run: sha256sum dist/* > dist/checksums.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
