@@ -25,6 +25,7 @@ IMPORT_ONLY=false
 SSH_ONLY=false
 RECREATE=false
 XML_PROFILE=""
+FCVPN_VM_PATH="/opt/forticlient/fcvpn"
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -263,12 +264,16 @@ phase_build() {
     bin_size=$(du -h "$bin_target" | cut -f1)
     pass "Binary built: $bin_target ($bin_size)"
 
-    # Copy to VM
-    log "Deploying binary to VM..."
+    # FortiClient verifies the caller's real executable path.  Install a real
+    # copy below its own directory; a symlink or binary under /tmp is rejected.
+    log "Deploying binary to $FCVPN_VM_PATH..."
     lima_cp_to_vm "$bin_target"
-    lima_run "mv /tmp/fcvpn-linux-amd64 /tmp/fcvpn && chmod +x /tmp/fcvpn"
-    lima_run "ls -lh /tmp/fcvpn"
-    lima_run "/tmp/fcvpn help 2>&1 | grep -q fcvpn" && \
+    if ! lima_run "sudo install -m 0755 /tmp/fcvpn-linux-amd64 $FCVPN_VM_PATH && rm -f /tmp/fcvpn-linux-amd64"; then
+        fail "Could not install fcvpn at $FCVPN_VM_PATH"
+        return 1
+    fi
+    lima_run "test -f $FCVPN_VM_PATH && test ! -L $FCVPN_VM_PATH && ls -lh $FCVPN_VM_PATH"
+    lima_run "$FCVPN_VM_PATH help 2>&1 | grep -q fcvpn" && \
         pass "Binary runs inside VM" || warn "Binary execution check failed"
 
     # Clean up host build artifact
@@ -290,7 +295,7 @@ phase_import() {
     # 3a: Import
     log "Importing $xml_name..."
     local import_output
-    import_output=$(lima_run "/tmp/fcvpn import /tmp/lima-forticlient/$xml_name" 2>&1 || true)
+    import_output=$(lima_run "$FCVPN_VM_PATH import /tmp/lima-forticlient/$xml_name" 2>&1 || true)
     echo "$import_output"
     if echo "$import_output" | grep -qi "imported\|✓"; then
         pass "Config import succeeded"
@@ -301,7 +306,7 @@ phase_import() {
     # 3b: List
     log "Listing configured tunnels..."
     local list_output
-    list_output=$(lima_run "/tmp/fcvpn list 2>&1" || true)
+    list_output=$(lima_run "$FCVPN_VM_PATH list 2>&1" || true)
     echo "$list_output"
     if echo "$list_output" | grep -qi "sangoma\|tunnels"; then
         pass "List shows configured tunnels"
@@ -386,7 +391,7 @@ phase_saml() {
     local xml_name
     xml_name=$(basename "$XML_PROFILE")
     local test_output
-    test_output=$(lima_run "/tmp/fcvpn list 2>&1" || true)
+    test_output=$(lima_run "$FCVPN_VM_PATH list 2>&1" || true)
     echo "$test_output"
 
     # Verify the binary can parse the port file location
@@ -445,7 +450,7 @@ phase_teardown() {
     pass "Cleaned up VM processes"
 
     # Remove build artifacts
-    lima_run 'rm -f /tmp/fcvpn'
+    lima_run "sudo rm -f $FCVPN_VM_PATH"
     pass "Cleaned up VM artifacts"
 }
 

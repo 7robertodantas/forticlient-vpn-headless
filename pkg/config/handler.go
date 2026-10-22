@@ -81,12 +81,25 @@ func (h *Handler) ListConfigs() ([]xml.Connection, error) {
 		return nil, fmt.Errorf("list configs failed (HTTP %d)", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
+	var raw interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("parse config response: %w", err)
 	}
 
-	return extractConnections(result)
+	switch v := raw.(type) {
+	case []interface{}:
+		var conns []xml.Connection
+		for _, c := range v {
+			if connMap, ok := c.(map[string]interface{}); ok {
+				conns = append(conns, xmlConnectionFromMap(connMap))
+			}
+		}
+		return conns, nil
+	case map[string]interface{}:
+		return extractConnections(v)
+	default:
+		return nil, fmt.Errorf("unexpected config response: %s", string(body))
+	}
 }
 
 // GetConnection returns a specific VPN connection by name.

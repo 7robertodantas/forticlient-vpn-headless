@@ -11,8 +11,8 @@ import (
 
 	"fcvpn"
 	"fcvpn/pkg/config"
-	"fcvpn/pkg/service"
 	"fcvpn/pkg/saml"
+	"fcvpn/pkg/service"
 	"fcvpn/pkg/ws"
 	"fcvpn/pkg/xml"
 )
@@ -85,9 +85,9 @@ func runImport(ctx context.Context, args []string) error {
 		return fmt.Errorf("no VPN connections found in config")
 	}
 
-	// Start required services
+	// Import only uses confighandler's HTTP API; fortitray is not needed.
 	mgr := service.NewManager()
-	port, err := mgr.StartRequired(ctx)
+	port, err := mgr.StartConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("start services: %w", err)
 	}
@@ -320,7 +320,7 @@ func runStatus(ctx context.Context, args []string) error {
 
 	// Show service status
 	mgr := service.NewManager()
-	
+
 	fmt.Println("FortiClient VPN Status")
 	fmt.Println(strings.Repeat("=", 40))
 	fmt.Println(mgr.Status())

@@ -32,14 +32,9 @@ func (m *Manager) StartAll(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Start fctsched (scheduler)
-	if err := m.startService(ctx, "fctsched", fcvpn.BinFctsched); err != nil {
-		return "", fmt.Errorf("start fctsched: %w", err)
-	}
-
-	// Start confighandler (config DB + HTTP server)
-	if err := m.startService(ctx, "confighandler", fcvpn.BinConfigHand); err != nil {
-		return "", fmt.Errorf("start confighandler: %w", err)
+	port, err := m.startConfigServices(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	// Start fortitray (fctservice - WebSocket + IPC)
@@ -47,14 +42,17 @@ func (m *Manager) StartAll(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("start fortitray: %w", err)
 	}
 
-	// Wait for the service port file to be created
-	port, err := m.waitForServicePort(ctx)
-	if err != nil {
-		m.StopAll()
-		return "", fmt.Errorf("wait for service port: %w", err)
-	}
-
 	return port, nil
+}
+
+// StartConfig starts only the services needed for configuration API requests.
+// fortitray needs GTK and owns the WebSocket API, neither of which import/list
+// uses; starting it makes configuration-only use fail in a headless VM.
+func (m *Manager) StartConfig(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.startConfigServices(ctx)
 }
 
 // StartRequired starts only services that aren't already running.
@@ -72,7 +70,20 @@ func (m *Manager) StartRequired(ctx context.Context) (string, error) {
 		// Port file exists but service is dead, clean up
 	}
 
-	// Start services fresh
+	// Start services needed by the WebSocket API.
+	port, err = m.startConfigServices(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if err := m.startService(ctx, "fortitray", fcvpn.BinFortitray); err != nil {
+		return "", fmt.Errorf("start fortitray: %w", err)
+	}
+
+	return port, nil
+}
+
+func (m *Manager) startConfigServices(ctx context.Context) (string, error) {
 	if err := m.startService(ctx, "fctsched", fcvpn.BinFctsched); err != nil {
 		return "", fmt.Errorf("start fctsched: %w", err)
 	}
@@ -81,13 +92,9 @@ func (m *Manager) StartRequired(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("start confighandler: %w", err)
 	}
 
-	if err := m.startService(ctx, "fortitray", fcvpn.BinFortitray); err != nil {
-		return "", fmt.Errorf("start fortitray: %w", err)
-	}
-
-	port, err = m.waitForServicePort(ctx)
+	port, err := m.waitForServicePort(ctx)
 	if err != nil {
-		m.StopAll()
+		m.stopAllLocked()
 		return "", fmt.Errorf("wait for service port: %w", err)
 	}
 
@@ -99,6 +106,10 @@ func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.stopAllLocked()
+}
+
+func (m *Manager) stopAllLocked() {
 	if m.fortitray != nil && m.fortitray.Process != nil {
 		m.fortitray.Process.Signal(syscall.SIGTERM)
 		m.fortitray.Wait()
