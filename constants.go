@@ -2,6 +2,33 @@ package fcvpn
 
 import (
 	"fmt"
+	"os"
+	"strings"
+)
+
+// Constants
+const (
+	// Service port file on Linux
+	ServicePortPath = "/var/run/forticlient/service_port"
+
+	// WebSocket endpoint
+	WSURL = "ws://127.0.0.1:PORT/websocket"
+
+	// SAML default ports
+	SAMLDefaultSSOPort = 8020
+	SAMLDefaultTimeout = 300 // seconds
+
+	// FortiClient binary paths
+	BinFortitray  = "/opt/forticlient/fortitray"
+	BinFctsched   = "/opt/forticlient/fctsched"
+	BinFortivpn   = "/opt/forticlient/fortivpn"
+	BinIked       = "/opt/forticlient/iked"
+	BinConfigHand = "/opt/forticlient/confighandler"
+
+	// IPC paths
+	IPCBase     = "/var/run/forticlient"
+	NSSDBPath   = "/home/%s/.pki/nssdb"
+	KeytarStore = "FortiClientLinuxVPN"
 )
 
 // SAML event types (from Electron app source)
@@ -31,17 +58,21 @@ const (
 
 // SAML types
 const (
-	SAMLTypeUnknown          = 0
-	SAMLTypeSSLVPN           = 1
-	SAMLTypeIPSECVPN         = 2
-	SAMLTypeZTNA             = 3
-	SAMLTypeEMS              = 4
-	SAMLStateUnknown         = 0
-	SAMLStateSuccess         = 1
-	SAMLStateTimeout         = 2
-	SAMLStateCancelled       = 3
-	SAMLStateClose           = 4
-	SAMLStateEmptyResponse   = 5
+	SAMLTypeUnknown  = 0
+	SAMLTypeSSLVPN   = 1
+	SAMLTypeIPSECVPN = 2
+	SAMLTypeZTNA     = 3
+	SAMLTypeEMS      = 4
+)
+
+// SAML states
+const (
+	SAMLStateUnknown           = 0
+	SAMLStateSuccess           = 1
+	SAMLStateTimeout           = 2
+	SAMLStateCancelled         = 3
+	SAMLStateClose             = 4
+	SAMLStateEmptyResponse     = 5
 	SAMLStateRedirectUnavailable = 6
 )
 
@@ -57,8 +88,35 @@ const (
 
 // Error types
 var (
-	ErrNoServicePort = fmt.Errorf("service port file not found")
+	ErrNoServicePort = fmt.Errorf("service port file not found: %s", ServicePortPath)
 	ErrNoGateway     = fmt.Errorf("no gateway host reachable")
 	ErrSAMLTimeout   = fmt.Errorf("SAML authentication timed out")
 	ErrNoConnection  = fmt.Errorf("no VPN connection established")
 )
+
+// PortReader reads the fctservice port from the service port file.
+type PortReader struct {
+	Port string
+}
+
+func (pr PortReader) Read() (string, error) {
+	data, err := os.ReadFile(ServicePortPath)
+	if err != nil {
+		return "", ErrNoServicePort
+	}
+	pr.Port = strings.TrimSpace(string(data))
+	if pr.Port == "" {
+		return "", ErrNoServicePort
+	}
+	return pr.Port, nil
+}
+
+// GetWSURL returns the WebSocket URL for the given port.
+func (pr PortReader) GetWSURL() string {
+	return fmt.Sprintf("ws://127.0.0.1:%s/websocket", pr.Port)
+}
+
+// GetHTTPURL returns the HTTP URL for the given port.
+func (pr PortReader) GetHTTPURL() string {
+	return fmt.Sprintf("http://127.0.0.1:%s", pr.Port)
+}
