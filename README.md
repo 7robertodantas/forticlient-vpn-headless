@@ -108,3 +108,4 @@ uses `xdg-open` (with chromium/firefox fallback). Runs fully headless.
 
 - [FortiClient IPsec Headless VPN Docs](docs/forticlient-ipsec-headless-vpn.md)
 - [Binary REA Report](docs/forticlient-ipsec-re-engineering.md)
+- [Lima VM Validation](LIMA.md) — ephemeral VM setup for reproducible testing

@@ -1,0 +1,23 @@
+# Lima VM definition — FortiClient VPN headless validation
+# Minimal footprint: no GUI, no display server, no X11
+# Memory: 1GB (FortiClient headless only needs ~200-300MB)
+# Build on host (GOOS=linux GOARCH=amd64), copy binary in.
+#
+# Uses runcmd in cloud-config instead of Lima provision scripts
+# (more reliable across Lima versions).
+
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/ubuntu-24.04
+- template:_default/mounts
+
+arch: x86_64
+cpus: 2
+memory: 1GiB
+disk: 15GiB
+mounts:
+- location: /tmp/lima-forticlient
+  mountPoint: /tmp/lima-forticlient
+  writable: true
+- location: "~"

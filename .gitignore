@@ -1,2 +1,5 @@
 fctsaml-bin
 *.test
+
+# Lima validation shared artifacts
+/tmp/lima-forticlient/
