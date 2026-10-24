@@ -48,9 +48,9 @@ network subnet that the VPN does not push (`FCT_SUBNET`, default
 
 ## Lima VM
 
-A local, ephemeral Ubuntu 24.04 VM (arm64, `vz`) on macOS, created from
-`lima/forticlient-vpn-headless.yaml`. The repo is mounted read-only and
-`scripts/install-gateway.sh` runs on first boot. SOCKS5 is forwarded to
+A local, ephemeral Debian 13 VM (arm64, `vz`, 1 CPU, 768 MiB, ~0.8 GB disk
+used) on macOS, created from `lima/forticlient-vpn-headless.yaml`. The repo
+is mounted read-only and `scripts/install-gateway.sh` runs on first boot. SOCKS5 is forwarded to
 `127.0.0.1:1080`.
 
 ```bash

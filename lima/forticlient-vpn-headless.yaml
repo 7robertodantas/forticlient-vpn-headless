@@ -2,11 +2,15 @@
 # Created by lima/up.sh; the repo is mounted read-only at /mnt/repo.
 minimumLimaVersion: 1.0.0
 base:
-- template:_images/ubuntu-24.04
+- template:_images/debian-13   # genericcloud: smaller image than Ubuntu's
 vmType: vz
-cpus: 2
-memory: 2GiB
-disk: 10GiB
+cpus: 1
+memory: 768MiB   # 512MiB runs fine but apt-get update can be OOM-killed
+disk: 4GiB
+# Lima installs and runs rootless containerd (nerdctl, BuildKit) by default.
+containerd:
+  system: false
+  user: false
 mounts:
 - location: "{{.Dir}}/../.."   # replaced by up.sh with the repo path
   mountPoint: /mnt/repo
@@ -17,10 +21,18 @@ portForwards:
 # Do not auto-forward anything else: iked's SAML callback port is forwarded by
 # scripts/saml-forward.py, which skips idle browser preconnects.
 - guestPortRange: [1, 65535]
+  proto: any
   ignore: true
 provision:
 - mode: system
   script: |
     #!/bin/bash
     set -eux
+    # Binary indexes only: no deb-src, no translations (less RAM and disk).
+    sed -i 's/^Types: deb deb-src$/Types: deb/' /etc/apt/sources.list.d/*.sources
+    echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99no-translations
     bash /mnt/repo/scripts/install-gateway.sh /mnt/repo
+    # Ephemeral VM: no background upgrades, no apt caches.
+    apt-get purge -y --auto-remove unattended-upgrades
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*

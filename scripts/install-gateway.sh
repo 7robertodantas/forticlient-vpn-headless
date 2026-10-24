@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install the headless gateway on a plain Debian/Ubuntu VM (Lima or external).
-# Tested on Ubuntu 24.04 (arm64) and Debian 13 (amd64). Safe to re-run.
+# Tested on Ubuntu 24.04 (arm64) and Debian 13 (arm64, amd64). Safe to re-run.
 #
 # Usage (as root): install-gateway.sh <dir>
 #   <dir> is a copy of this repo on the VM; only these are used:
@@ -39,6 +39,8 @@ CONTROL
 dpkg-deb -b "$dummy/pkg" "$dummy/forticlient-headless-deps.deb" >/dev/null
 dpkg -i "$dummy/forticlient-headless-deps.deb"
 rm -rf "$dummy"
+# Do not unpack the Electron GUI (~300 MB); also applies to later upgrades.
+echo 'path-exclude=/opt/forticlient/gui/*' > /etc/dpkg/dpkg.cfg.d/forticlient-headless
 
 apt-get update
 apt-get install -y --no-install-recommends "${runtime[@]}"

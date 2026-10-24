@@ -119,6 +119,14 @@ it. `/etc/resolv.conf` is rewritten in place and is fine.
   the VM's own hostname (`sudo: unable to resolve host`).
   `install-gateway.sh` adds `127.0.1.1 <hostname>` to `/etc/hosts`. It was
   applied by hand to the test VM but not yet re-verified with a connection.
+- Minimal footprint, 2026-10-24: switched the template to Debian 13
+  genericcloud, 1 CPU, 768 MiB, and turned off Lima's default rootless
+  containerd. A dpkg `path-exclude` skips the unused Electron GUI (~300 MB).
+  Provisioning also drops deb-src and translation indexes, apt caches and
+  `unattended-upgrades`. Idle: ~180 MiB used, 832 MB on the guest disk,
+  1.1 GB on the host. At 512 MiB, `apt-get update` was OOM-killed during
+  provisioning. `fct-list` and SOCKS forwarding are verified; a SAML connect
+  on this image has not been re-tested yet.
 - The VM's LAN must not overlap any pushed subnet. Lima's `192.168.5.0/24` is
   fine. Check this for an external VM's network.
 
