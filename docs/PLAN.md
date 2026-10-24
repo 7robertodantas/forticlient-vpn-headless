@@ -42,7 +42,7 @@ The deb was inspected (arm64 and amd64 have the same layout).
 Use the vendor binaries unchanged. Do not reimplement the IPC (that was the
 earlier Go attempt, now removed). Add only:
 
-1. **Install without GUI.** Install the deb on a minimal Ubuntu 24.04 and run
+1. **Install without GUI.** Install the deb on a minimal Debian 13 and run
    `fctsched` as PID-1 child (container) or systemd service (VM).
 2. **Import the profile.** Use the vendor CLI or GUI-less config path to load
    the XML.

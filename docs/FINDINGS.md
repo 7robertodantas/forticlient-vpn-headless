@@ -9,8 +9,14 @@ Apple Silicon. Dates are 2026-10-24.
   `firewall`, and later `fortivpn` and `iked` on connect.
 - None of those need GTK. The image installs the deb with
   `dpkg --force-depends` and only the libs those binaries link to (glib,
-  libsecret, libudev and a few others). `fortitray` and the Electron GUI are
-  present on disk but never run.
+  libsecret, libudev and a few others). `fortitray` is present on disk but
+  never runs; the Electron GUI is not unpacked.
+- Minimal image, 2026-10-24: `debian:trixie-slim` instead of `ubuntu:24.04`.
+  A dpkg `path-exclude` skips the Electron GUI, docs, man pages and locales.
+  The deb is bind-mounted at build time rather than `COPY`ed, so it does not
+  stay in a layer (119 MB). `ping` and `dig` were dropped. 1.37 GB went down
+  to 422 MB (arm64). Import, `fct-list` and SOCKS are verified; a SAML connect
+  on this image has not been re-tested yet.
 
 ## Two container-specific requirements
 
