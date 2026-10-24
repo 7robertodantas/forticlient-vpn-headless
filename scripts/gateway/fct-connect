@@ -1,0 +1,45 @@
+#!/bin/bash
+# Start a VPN connection and print the SAML hand-off for the host:
+#   SAML_URL=<login url>   open this in the host browser
+#   SAML_PORT=<port>       iked's 127.0.0.1 callback listener to forward
+# Usage: fct-connect "<profile name>" [timeout_seconds]
+set -euo pipefail
+. /usr/local/bin/fct-lib.sh
+
+name=${1:?usage: fct-connect "<profile name>" [timeout]}
+timeout=${2:-60}
+
+if is_connected; then echo "STATE=connected"; exit 0; fi
+
+# Keep the gateway's own LAN off the VPN (re-applied each time: DHCP may
+# have changed the subnet).
+if [ -d /run/systemd/system ] && ! [ -f /.dockerenv ]; then
+    fct-protect-lan apply >/dev/null
+fi
+
+touch "$IPSEC_LOG"
+if pgrep -f "^fortivpn connect" >/dev/null; then
+    # An attempt is already waiting for SAML: reuse its (latest) URL.
+    start_line=1
+else
+    start_line=$(( $(wc -l < "$IPSEC_LOG") + 1 ))
+    # The CLI exits early (no keyring/UI), but iked keeps going on its own.
+    as_user setsid "$FCT_DIR/forticlient-cli" vpn connect "$name" \
+        >>/var/log/forticlient/cli-connect.log 2>&1 < /dev/null &
+fi
+
+url=""
+for _ in $(seq 1 $((timeout * 2))); do
+    url=$(tail -n +"$start_line" "$IPSEC_LOG" \
+          | sed -n 's/.*Received SAML URL \(https[^ ]*\).*/\1/p' | tail -1)
+    [ -n "$url" ] && break
+    if is_connected; then echo "STATE=connected"; exit 0; fi
+    sleep 0.5
+done
+[ -n "$url" ] || die "no SAML URL within ${timeout}s; see $IPSEC_LOG"
+
+port=$(ss -Hltnp 2>/dev/null | awk '/"iked"/ && $4 ~ /^127\.0\.0\.1:/ {sub(/.*:/,"",$4); print $4; exit}')
+[ -n "$port" ] || die "iked SAML listener not found"
+
+echo "SAML_URL=$url"
+echo "SAML_PORT=$port"

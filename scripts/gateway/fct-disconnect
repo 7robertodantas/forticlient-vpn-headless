@@ -1,0 +1,5 @@
+#!/bin/bash
+# Usage: fct-disconnect ["<profile name>"]
+set -uo pipefail
+. /usr/local/bin/fct-lib.sh
+as_user "$FCT_DIR/forticlient-cli" vpn disconnect ${1:+"$1"}

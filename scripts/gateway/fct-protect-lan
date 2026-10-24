@@ -1,0 +1,43 @@
+#!/bin/bash
+# Keep the gateway's directly attached IPv4 subnets local while the VPN is up.
+#
+# The VPN may push split routes that cover the gateway's own LAN (e.g.
+# 192.168.1.0/24). FortiClient puts them in the main table and they would win
+# for new connections. A policy rule per attached subnet, ahead of the main
+# table, keeps the LAN on the LAN no matter what FortiClient adds or re-adds.
+# Subnets are detected from the kernel's connected routes, so nothing is
+# hard-coded. Applied by fct-connect before every connect; the rules last
+# until reboot (or `fct-protect-lan remove`).
+#
+# Usage: fct-protect-lan [apply|remove|status]
+set -euo pipefail
+
+TABLE=${FCT_LAN_TABLE:-201}
+PREF=${FCT_LAN_PREF:-201}
+
+remove() {
+    while ip -4 rule del pref "$PREF" 2>/dev/null; do :; done
+    ip -4 route flush table "$TABLE" 2>/dev/null || true
+}
+
+case "${1:-apply}" in
+apply)
+    remove
+    ip -4 -o route show table main proto kernel scope link | while read -r net _ dev _; do
+        src=$(ip -4 -o route show table main exact "$net" proto kernel | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+        ip -4 route add table "$TABLE" "$net" dev "$dev" scope link ${src:+src "$src"}
+        ip -4 rule add pref "$PREF" to "$net" lookup "$TABLE"
+        echo "protected $net (dev $dev)"
+    done
+    ;;
+remove)
+    remove
+    ;;
+status)
+    ip -4 rule show pref "$PREF"
+    ip -4 route show table "$TABLE"
+    ;;
+*)
+    echo "usage: $0 [apply|remove|status]" >&2; exit 2
+    ;;
+esac

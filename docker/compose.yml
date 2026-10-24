@@ -1,0 +1,31 @@
+services:
+  fct-headless:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: fct-headless
+    container_name: fct-headless
+    init: true
+    cap_add:
+      - NET_ADMIN   # routes, XFRM (IPsec) state and policies, iptables
+      - SYS_PTRACE  # confighandler reads /proc/<pid>/exe of the non-root CLI
+      - SYS_ADMIN   # iked bind-mounts its own hosts file over /etc/hosts
+    security_opt:
+      # iked/fortivpn pass the SAML token and passwords through the kernel
+      # keyring (keyctl/add_key), which Docker's default seccomp profile blocks.
+      - seccomp=unconfined
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ../secrets:/profiles:ro
+    ports:
+      - "127.0.0.1:1080:1080"   # SOCKS5 (microsocks)
+
+networks:
+  default:
+    ipam:
+      config:
+        # Must not overlap any split-tunnel subnet the VPN pushes: FortiClient
+        # stops adding routes at the first conflict (it pushes 172.20.0.0/16,
+        # Compose's usual pick). Override with FCT_SUBNET if needed.
+        - subnet: ${FCT_SUBNET:-198.18.0.0/24}

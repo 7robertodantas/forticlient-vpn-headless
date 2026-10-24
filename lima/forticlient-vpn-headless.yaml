@@ -1,0 +1,26 @@
+# Ephemeral local headless gateway VM.
+# Created by lima/up.sh; the repo is mounted read-only at /mnt/repo.
+minimumLimaVersion: 1.0.0
+base:
+- template:_images/ubuntu-24.04
+vmType: vz
+cpus: 2
+memory: 2GiB
+disk: 10GiB
+mounts:
+- location: "{{.Dir}}/../.."   # replaced by up.sh with the repo path
+  mountPoint: /mnt/repo
+  writable: false
+portForwards:
+- guestPort: 1080          # SOCKS5 (microsocks)
+  hostIP: 127.0.0.1
+# Do not auto-forward anything else: iked's SAML callback port is forwarded by
+# scripts/saml-forward.py, which skips idle browser preconnects.
+- guestPortRange: [1, 65535]
+  ignore: true
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux
+    bash /mnt/repo/scripts/install-gateway.sh /mnt/repo

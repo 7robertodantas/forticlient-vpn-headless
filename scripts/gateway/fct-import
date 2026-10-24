@@ -1,0 +1,18 @@
+#!/bin/bash
+# Import FortiClient XML profiles (same call as GUI Settings > Restore).
+# Usage: fct-import file.xml [...]
+set -euo pipefail
+. /usr/local/bin/fct-lib.sh
+
+[ $# -gt 0 ] || die "usage: fct-import file.xml [...]"
+for xml in "$@"; do
+    [ -r "$xml" ] || die "cannot read $xml"
+    # confighandler (root) reads the path itself; keep a private copy.
+    tmp=$(mktemp /tmp/fct-import.XXXXXX.xml)
+    cp "$xml" "$tmp"
+    chmod 0600 "$tmp"
+    api POST /settings/config -d "{\"type\":\"restore\",\"path\":\"$tmp\",\"password\":\"\"}" >/dev/null
+    rm -f "$tmp"
+    echo "imported $xml"
+done
+fct-list

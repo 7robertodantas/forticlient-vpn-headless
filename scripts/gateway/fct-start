@@ -1,0 +1,15 @@
+#!/bin/bash
+# Start the FortiClient daemons if they are not running (no systemd needed).
+set -euo pipefail
+. /usr/local/bin/fct-lib.sh
+
+mkdir -p /var/run/forticlient /var/log/forticlient
+if ! pgrep -x fctsched >/dev/null; then
+    if [ -d /run/systemd/system ] && systemctl cat forticlient.service >/dev/null 2>&1; then
+        systemctl start forticlient.service
+    else
+        rm -f "$PORT_FILE"
+        setsid "$FCT_DIR/fctsched" >>/var/log/forticlient/fctsched.stdout 2>&1 < /dev/null &
+    fi
+fi
+echo "confighandler port $(service_port)"

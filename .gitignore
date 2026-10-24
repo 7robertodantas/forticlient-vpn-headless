@@ -1,0 +1,7 @@
+/vendor/*
+!/vendor/.gitkeep
+/secrets/*
+!/secrets/.gitkeep
+.DS_Store
+.env
+.claude/settings.local.json

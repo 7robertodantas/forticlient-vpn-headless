@@ -1,0 +1,13 @@
+#!/bin/bash
+# Print tunnel state. Exit 0 when an IPsec SA is installed.
+. /usr/local/bin/fct-lib.sh
+
+if is_connected; then
+    echo "STATE=connected"
+    ip -br addr | grep -vE '^(lo|eth0)\b' || true
+    echo "--- resolv.conf"; grep -v '^#' /etc/resolv.conf
+    exit 0
+fi
+echo "STATE=disconnected"
+tail -n 3 "$IPSEC_LOG" 2>/dev/null | cut -c1-200
+exit 1

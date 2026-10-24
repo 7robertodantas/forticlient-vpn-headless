@@ -1,0 +1,24 @@
+#!/bin/bash
+# Container entrypoint: daemons, profile import from /profiles, SOCKS5 proxy.
+set -euo pipefail
+. /usr/local/bin/fct-lib.sh
+
+# Docker bind-mounts /etc/hosts. iked unmounts whatever is mounted there before
+# mounting its own copy, which would expose the empty file underneath (no
+# localhost). Move Docker's content into the real file first.
+if mountpoint -q /etc/hosts; then
+    hosts=$(cat /etc/hosts)
+    umount /etc/hosts && printf '%s\n' "$hosts" > /etc/hosts
+fi
+
+fct-start
+shopt -s nullglob
+profiles=(/profiles/*.xml)
+[ ${#profiles[@]} -eq 0 ] || fct-import "${profiles[@]}"
+
+microsocks -i 0.0.0.0 -p "${SOCKS_PORT:-1080}" &
+echo "SOCKS5 on :${SOCKS_PORT:-1080}. Ready."
+
+# Stay up while fctsched and microsocks live.
+while pgrep -x fctsched >/dev/null && pgrep -x microsocks >/dev/null; do sleep 5; done
+die "fctsched or microsocks exited"

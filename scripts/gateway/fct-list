@@ -1,0 +1,6 @@
+#!/bin/bash
+# List VPN profiles known to confighandler (the CLI hides IPsec/corporate ones).
+set -euo pipefail
+. /usr/local/bin/fct-lib.sh
+
+api GET /vpn | jq -r '.[] | "\(.type)\t\(.connection_name)\t\(.remote_gateway)"'
