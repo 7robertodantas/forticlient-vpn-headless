@@ -1,0 +1,7 @@
+# The build only needs scripts/ and vendor/. Keep profiles and local
+# settings out of the build context.
+.git
+.env
+secrets
+lima
+docs

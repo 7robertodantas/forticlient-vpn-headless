@@ -12,10 +12,27 @@ internals.
 ## Setup
 
 ```bash
-cp ~/Downloads/forticlient_vpn/forticlient_vpn_7.4.3.5411_{arm64,amd64}.deb vendor/
 cp /path/to/your-profile.xml secrets/   # git-ignored
 cp .env.example .env                    # git-ignored; set FCT_PROFILE (and GW/SSH_OPTS for a VM)
 ```
+
+The Docker build uses `vendor/forticlient_vpn_<version>_<arch>.deb` when it
+is there, and otherwise downloads it from Fortinet and checks its SHA-256:
+
+```bash
+# Optional: use local debs (no download on every rebuild).
+cp ~/Downloads/forticlient_vpn/forticlient_vpn_7.4.3.5411_{arm64,amd64}.deb vendor/
+```
+
+Build arguments: `FCT_VERSION` (default `7.4.3.5411`), `FCT_URL` (default
+`https://filestore.fortinet.com/forticlient/downloads/forticlient_vpn_${FCT_VERSION}_${TARGETARCH}.deb`)
+and `FCT_SHA256_amd64` / `FCT_SHA256_arm64` (pinned for the default version;
+set to empty to skip the check for another version). The Lima and external VM
+installers still need the deb in `vendor/`.
+
+The image is not published to a registry: Fortinet's EULA (§2) does not
+allow redistributing FortiClient, so everyone builds their own and gets the
+deb from Fortinet directly.
 
 ## Docker
 
@@ -27,6 +44,8 @@ curl --socks5-hostname 127.0.0.1:1080 http://some.internal.host/
 ```
 
 Change the profile name with `make docker-connect PROFILE="Other VPN"`.
+To import a profile into the running container without restarting it:
+`docker exec -i fct-headless fct-import /dev/stdin < your-profile.xml`.
 
 ### Shut down
 

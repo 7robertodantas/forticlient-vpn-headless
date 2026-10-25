@@ -89,7 +89,8 @@ the Mac, with Lima port forwards for the redirect port and 1080.
 docker/                 Dockerfile, entrypoint
 scripts/                install + helpers shared by Docker and VM
 lima/                   Lima VM template
-vendor/                 (git-ignored) the .deb files
+vendor/                 (git-ignored) the .deb files; the Docker build
+                        downloads them from Fortinet when absent
 secrets/                (git-ignored) the profile XML
 docs/PLAN.md            this file
 docs/FINDINGS.md        what each attempt showed

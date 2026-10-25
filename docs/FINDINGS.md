@@ -17,6 +17,10 @@ Apple Silicon. Dates are 2026-10-24.
   stay in a layer (119 MB). `ping` and `dig` were dropped. 1.37 GB went down
   to 422 MB (arm64). Import, `fct-list` and SOCKS are verified; a SAML connect
   on this image has not been re-tested yet.
+- Download fallback, 2026-10-24: with no deb in `vendor/` the build
+  downloads it from `filestore.fortinet.com` and checks the pinned SHA-256
+  (a wrong hash fails the build). The result is the same 422 MB. Profiles
+  also import over stdin (`docker exec -i … fct-import /dev/stdin`).
 
 ## Two container-specific requirements
 
