@@ -38,9 +38,9 @@ host = root@192.0.2.10
 ssh_opts = -i ~/.ssh/id_ed25519
 ```
 
-Nothing in the repo is specific to you. The config, the XML files, and the
-debs in `vendor/` are git-ignored or live outside the repo.
-`FCVPN_CONFIG_DIR` points `fcvpn` at another config directory.
+Settings stay out of the repo. The config and the XML exports live in
+`~/.config/fcvpn/` (or `$FCVPN_CONFIG_DIR`), and the debs in `vendor/` are
+git-ignored.
 
 ## Use
 
