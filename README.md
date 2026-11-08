@@ -9,15 +9,78 @@ See [docs/PLAN.md](docs/PLAN.md) for the design and
 [docs/FINDINGS.md](docs/FINDINGS.md) for what was learned about FortiClient
 internals.
 
-## Setup
+## Install
 
 ```bash
-cp /path/to/your-profile.xml secrets/   # git-ignored
-cp .env.example .env                    # git-ignored; set FCT_PROFILE (and GW/SSH_OPTS for a VM)
+git clone https://github.com/7robertodantas/forticlient-vpn-headless.git
+ln -s "$PWD/forticlient-vpn-headless/bin/fcvpn" ~/.local/bin/fcvpn   # any dir on your PATH
+fcvpn init      # writes ~/.config/fcvpn/config from config.example
 ```
 
-The Docker build uses `vendor/forticlient_vpn_<version>_<arch>.deb` when it
-is there, and otherwise downloads it from Fortinet and checks its SHA-256:
+Then:
+
+1. Export your VPN profile from a FortiClient GUI (Settings > Backup), and put
+   the XML in `~/.config/fcvpn/profiles/`.
+2. Edit `~/.config/fcvpn/config`: one section per profile, each naming the
+   connection inside the XML and the gateway that runs it.
+
+```ini
+default = work
+
+[work]
+connection = My Corp VPN    # the name inside the XML
+gateway = docker            # docker, lima or ssh
+
+[work-vm]
+connection = My Corp VPN
+gateway = ssh
+host = root@192.0.2.10
+ssh_opts = -i ~/.ssh/id_ed25519
+```
+
+Nothing in the repo is specific to you. The config, the XML files, and the
+debs in `vendor/` are git-ignored or live outside the repo.
+`FCVPN_CONFIG_DIR` points `fcvpn` at another config directory.
+
+## Use
+
+```bash
+fcvpn connect           # the default profile: starts the gateway if needed,
+                        # opens the SAML login in your browser, waits for the tunnel
+fcvpn connect work-vm   # or name one
+fcvpn status            # STATE=connected/disconnected, and the SOCKS5 address
+curl --socks5-hostname "$(fcvpn proxy)" http://some.internal.host/
+fcvpn disconnect        # close the tunnel; the gateway keeps running
+fcvpn down              # remove the container (or delete the VM)
+fcvpn list              # profiles; * marks the default
+```
+
+| Command | What it does |
+|---|---|
+| `connect [profile]` | start the gateway if needed, log in, wait for the tunnel |
+| `disconnect [profile]` | close the tunnel, keep the gateway |
+| `status [profile]` | tunnel state, profile, SOCKS5 address; exit 0 when connected |
+| `proxy [profile]` | just the SOCKS5 `host:port` |
+| `up` / `down [profile]` | start or remove the gateway (container or VM) |
+| `import [profile]` | import `~/.config/fcvpn/profiles/*.xml` into a running gateway |
+| `setup [profile]` | `gateway = ssh`: install the gateway on that VM |
+| `shell [profile]` | root shell on the gateway |
+| `list`, `init` | profiles in the config; write a sample config |
+
+Without a profile argument, `fcvpn` uses `$FCVPN_PROFILE`, then `default` in
+the config, then the only profile there is.
+
+## Gateways
+
+### Docker (`gateway = docker`)
+
+`fcvpn up` (or the first `connect`) builds the image and starts the
+`fct-headless` container. On start, the container imports the XML files and
+serves SOCKS5 on `127.0.0.1:1080`, or on `socks` from the profile. Set
+`docker = podman` in the config to use Podman.
+
+The build uses `vendor/forticlient_vpn_<version>_<arch>.deb` when it is
+there, and otherwise downloads it from Fortinet and checks its SHA-256:
 
 ```bash
 # Optional: use local debs (no download on every rebuild).
@@ -34,77 +97,41 @@ The image is not published to a registry: Fortinet's EULA (§2) does not
 allow redistributing FortiClient, so everyone builds their own and gets the
 deb from Fortinet directly.
 
-## Docker
-
-```bash
-make docker-up          # build, start, import secrets/*.xml, SOCKS5 on 127.0.0.1:1080
-make docker-connect     # opens SAML login in your browser, waits for the tunnel
-make docker-status
-curl --socks5-hostname 127.0.0.1:1080 http://some.internal.host/
-```
-
-Change the profile name with `make docker-connect PROFILE="Other VPN"`.
-To import a profile into the running container without restarting it:
-`docker exec -i fct-headless fct-import /dev/stdin < your-profile.xml`.
-
-### Shut down
-
-```bash
-make docker-disconnect  # close the tunnel; DNS and routes inside the container are restored
-make docker-status      # should print STATE=disconnected
-make docker-down        # stop and remove the container, its network and the image
-```
-
-`make docker-disconnect` keeps the container running, so you can run
-`make docker-connect` again. `make docker-down` removes everything. The next
-`make docker-up` rebuilds from scratch. If the container is gone, nothing on
-the host needs cleaning up: the VPN never touched the host's DNS or routes.
+`fcvpn disconnect` keeps the container running, so you can `connect` again.
+`fcvpn down` removes the container, its network and the image. The next
+`up` rebuilds from scratch. If the container is gone, nothing on the host
+needs cleaning up: the VPN never touched the host's DNS or routes.
 
 The container needs `NET_ADMIN`, `SYS_PTRACE` and `SYS_ADMIN`, plus
 `seccomp=unconfined` (FortiClient uses the kernel keyring). It also needs a
 network subnet that the VPN does not push (`FCT_SUBNET`, default
 `198.18.0.0/24`). [docs/FINDINGS.md](docs/FINDINGS.md) explains why.
 
-## Lima VM
+### Lima VM (`gateway = lima`, macOS)
 
 A local, ephemeral Debian 13 VM (arm64, `vz`, 1 CPU, 768 MiB, ~0.8 GB disk
-used) on macOS, created from `lima/forticlient-vpn-headless.yaml`. The repo
-is mounted read-only and `scripts/install-gateway.sh` runs on first boot. SOCKS5 is forwarded to
-`127.0.0.1:1080`.
+used), created from `lima/forticlient-vpn-headless.yaml`. The repo is
+mounted read-only, and `scripts/install-gateway.sh` runs on first boot.
+`fcvpn up` creates (or recreates) it and imports your XML files. SOCKS5 is
+forwarded to `127.0.0.1:1080`. `fcvpn down` deletes the VM.
+
+### External VM (`gateway = ssh`)
+
+Any Debian/Ubuntu VM you can reach over SSH as root, for example on a
+hypervisor in your LAN. Tested on Debian 13 (amd64). Put the VM's deb in
+`vendor/`, then:
 
 ```bash
-make vm-up              # create (or recreate) the VM and install the gateway
-make vm-connect         # opens SAML login in your browser, waits for the tunnel
-make vm-status
-make vm-disconnect      # close the tunnel, keep the VM
-make vm-down            # delete the VM
+fcvpn setup work-vm     # copies scripts, the deb and your XML files to /opt/fct-headless
+                        # on the VM and runs the installer there; safe to re-run
+fcvpn connect work-vm
 ```
 
-## External VM gateway
-
-Any Debian/Ubuntu VM you can reach over SSH, for example on a hypervisor in
-your LAN. Tested on Debian 13 (amd64). Copy the needed
-parts of the repo to the VM, then run the installer there. It is safe to re-run.
-
-```bash
-GW=root@<gateway-ip>; KEY=~/.ssh/<key>
-COPYFILE_DISABLE=1 tar --no-xattrs -czf - scripts secrets/*.xml vendor/*_amd64.deb \
-  | ssh -i $KEY $GW 'mkdir -p /opt/fct-headless && tar -xzf - -C /opt/fct-headless --no-same-owner'
-ssh -i $KEY $GW bash /opt/fct-headless/scripts/install-gateway.sh /opt/fct-headless
-```
-
-Then, from your machine:
-
-```bash
-make ssh-connect      # GW and SSH_OPTS from .env (or pass GW=... SSH_OPTS=...)
-make ssh-status
-make ssh-disconnect
-```
-
-Point SOCKS5 at `<vm>:1080`. The installer adds `fct-microsocks.service`
-unless something already listens on 1080. It also installs an empty
-`forticlient-headless-deps` package that stands in for the GUI libraries, so
-apt stays consistent.
+`fcvpn` never starts or stops that VM, and `down` only disconnects. Point
+SOCKS5 at `<vm>:1080`, the profile's default `socks`. The installer adds
+`fct-microsocks.service` unless something already listens on 1080. It also
+installs an empty `forticlient-headless-deps` package that stands in for the
+GUI libraries, so apt stays consistent.
 
 If the VPN pushes the gateway's own LAN (for example `192.168.1.0/24`),
 `fct-protect-lan` keeps it local. It adds a policy rule per directly attached
@@ -122,6 +149,7 @@ gateway.
 | `fct-import` | gateway | GUI-equivalent XML restore through `confighandler` |
 | `fct-connect` | gateway | starts the connect, prints `SAML_URL` and `SAML_PORT` |
 | `fct-status` / `fct-disconnect` | gateway | tunnel state (XFRM SA) / stop |
+| `bin/fcvpn` | host | profiles, gateway lifecycle, the commands below on the right gateway |
 | `scripts/connect.sh` | host | opens the URL, forwards the callback port, waits |
 | `scripts/saml-forward.py` | host | `localhost:PORT` → `GW_EXEC socat` → gateway `127.0.0.1:PORT` |
 
@@ -152,8 +180,8 @@ is listening. So the redirect has to be carried over to the gateway:
 
 No port needs to be published on the gateway for this. The request goes
 through the same command channel used to run the other commands there
-(`GW_EXEC`). This is why the same `connect.sh` works for `make
-docker-connect`, `make vm-connect` and `make ssh-connect`. A fixed
+(`GW_EXEC`). This is why the same `connect.sh` works for all three
+gateways. A fixed
 `docker -p` or Lima port forward could not do it, because the port changes
 every time.
 

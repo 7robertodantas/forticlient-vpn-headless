@@ -86,15 +86,18 @@ the Mac, with Lima port forwards for the redirect port and 1080.
 ## Layout
 
 ```
-docker/                 Dockerfile, entrypoint
+bin/fcvpn               the CLI: profiles from ~/.config/fcvpn/config
+config.example          its sample config
+docker/                 Dockerfile, compose file
 scripts/                install + helpers shared by Docker and VM
 lima/                   Lima VM template
 vendor/                 (git-ignored) the .deb files; the Docker build
                         downloads them from Fortinet when absent
-secrets/                (git-ignored) the profile XML
+secrets/                (git-ignored) legacy place for the profile XML; now
+                        ~/.config/fcvpn/profiles/
 docs/PLAN.md            this file
 docs/FINDINGS.md        what each attempt showed
 ```
 
-Everything is ephemeral: `make docker-up` and `make docker-down`, `make vm-up`
-and `make vm-down`.
+Everything is ephemeral: `fcvpn up` and `fcvpn down`, for the container
+and the Lima VM alike.

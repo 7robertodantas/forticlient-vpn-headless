@@ -1,20 +1,26 @@
 #!/bin/bash
 # Connect the gateway's VPN, doing the SAML login in this host's browser.
 #
-#   scripts/connect.sh ["<profile name>"]
+#   scripts/connect.sh "<connection name>" [-- <gateway command>...]
 #
-# GW_EXEC is how to run a command on the gateway as root, e.g.
+# Usually run by `fcvpn connect`. The gateway command runs a command on the
+# gateway as root, e.g.
 #   docker exec -i fct-headless                (default)
 #   limactl shell --workdir / forticlient-vpn-headless sudo
 #   ssh root@gateway-vm                        (external VM)
+# GW_EXEC (one string, split on spaces) is still read when there's no "--".
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 PROFILE=${1:-${FCT_PROFILE:-}}
-[ -n "$PROFILE" ] || { echo "usage: connect.sh \"<profile name>\" (or set FCT_PROFILE)" >&2; exit 2; }
-GW_EXEC=${GW_EXEC:-docker exec -i fct-headless}
+[ -n "$PROFILE" ] || { echo "usage: connect.sh \"<connection name>\" [-- gateway command...]" >&2; exit 2; }
+[ $# -gt 0 ] && shift
 LOGIN_TIMEOUT=${LOGIN_TIMEOUT:-300}
-read -r -a gw <<<"$GW_EXEC"
+if [ "${1:-}" = -- ] && [ $# -gt 1 ]; then
+    shift; gw=("$@")
+else
+    read -r -a gw <<<"${GW_EXEC:-docker exec -i fct-headless}"
+fi
 
 # Run a command on the gateway. ssh joins its arguments into one remote shell
 # command, so quote them there; docker exec / limactl shell pass argv as is.

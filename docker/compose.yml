@@ -17,9 +17,10 @@ services:
     devices:
       - /dev/net/tun
     volumes:
-      - ../secrets:/profiles:ro
+      # FortiClient XML exports, imported on start (fcvpn: ~/.config/fcvpn/profiles)
+      - ${FCVPN_PROFILES:-../secrets}:/profiles:ro
     ports:
-      - "127.0.0.1:1080:1080"   # SOCKS5 (microsocks)
+      - "${FCVPN_SOCKS:-127.0.0.1:1080}:1080"   # SOCKS5 (microsocks); fcvpn: `socks` in the profile
 
 networks:
   default:

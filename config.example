@@ -1,0 +1,31 @@
+# fcvpn config: ~/.config/fcvpn/config (`fcvpn init` copies this file there).
+# FortiClient XML exports go in ~/.config/fcvpn/profiles/ and are imported
+# into the gateway (`fcvpn import`, or on `fcvpn up`).
+#
+# Global keys come first, then one [section] per profile. A profile is a
+# short name for one VPN connection on one gateway: `fcvpn connect work`.
+# Text after " #" on a line is a comment.
+
+# Used when no profile is named (or set FCVPN_PROFILE).
+default = work
+
+# Container CLI for gateway = docker: docker or podman.
+# docker = docker
+
+# A gateway in a local container: SOCKS5 on 127.0.0.1:1080.
+[work]
+# The connection name inside the imported XML (`fcvpn import` lists them).
+connection = My Corp VPN
+# docker (default), lima (a local VM on macOS) or ssh (any Debian/Ubuntu VM)
+gateway = docker
+# Where the SOCKS5 proxy is published (docker) or reached (lima, ssh).
+# socks = 127.0.0.1:1080
+
+# The same VPN through a VM on your LAN, set up once with `fcvpn setup work-vm`.
+[work-vm]
+connection = My Corp VPN
+gateway = ssh
+host = root@192.0.2.10
+# Extra ssh options, split on spaces; a leading ~/ is expanded.
+ssh_opts = -i ~/.ssh/id_ed25519
+# socks = 192.0.2.10:1080   (default: the host's address, port 1080)

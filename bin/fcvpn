@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# fcvpn: one CLI for the headless FortiClient VPN gateway, whatever runs it
+# (a Docker container, the Lima VM or a VM over SSH). Profiles live in
+# ~/.config/fcvpn/config. See README.md.
+# Stays compatible with macOS's bash 3.2: no associative arrays or mapfile.
+set -euo pipefail
+
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    case $src in /*) ;; *) src=$dir/$src ;; esac
+done
+ROOT=$(cd -P "$(dirname "$src")/.." && pwd)
+
+CONFIG_DIR=${FCVPN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/fcvpn}
+CONFIG=$CONFIG_DIR/config
+XML_DIR=$CONFIG_DIR/profiles
+CONTAINER=fct-headless
+VM=forticlient-vpn-headless
+
+die() { echo "fcvpn: $*" >&2; exit 1; }
+say() { echo "==> $*" >&2; }
+
+usage() {
+    cat <<'USAGE'
+Usage: fcvpn <command> [profile]
+
+  connect    [profile]  start the gateway if needed, log in (SAML, in your browser),
+                        wait for the tunnel
+  disconnect [profile]  close the tunnel; the gateway keeps running
+  status     [profile]  tunnel state and the SOCKS5 address (exit 0 when connected)
+  proxy      [profile]  print the SOCKS5 address (host:port)
+  up         [profile]  start the gateway: build and run the container, or create the VM
+  down       [profile]  remove the container and its image, or delete the VM
+  import     [profile]  import ~/.config/fcvpn/profiles/*.xml into the gateway
+  setup      [profile]  gateway = ssh: install the gateway on that VM (safe to re-run)
+  shell      [profile]  root shell on the gateway
+  list                  profiles in the config (* marks the default)
+  init                  write a sample config to edit
+
+The profile is the argument, else $FCVPN_PROFILE, else `default` in the config,
+else the only one there is. Config: ${FCVPN_CONFIG_DIR:-~/.config/fcvpn}/config.
+USAGE
+}
+
+# --- config (INI: global keys first, then [profile] sections) ---------------
+
+# cfg <section|""> <key>: the value, or nothing (exit 1)
+cfg() {
+    [ -f "$CONFIG" ] || return 1
+    awk -v want="$1" -v key="$2" '
+        /^[[:space:]]*([#;]|$)/ { next }
+        /^[[:space:]]*\[/ { s = $0; gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", s); next }
+        s == want {
+            k = $0; sub(/=.*/, "", k); gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+            if (k != key) next
+            v = $0; sub(/^[^=]*=/, "", v); sub(/[[:space:]]+#.*$/, "", v)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            print v; found = 1; exit
+        }
+        END { exit !found }' "$CONFIG"
+}
+
+profiles() {
+    [ -f "$CONFIG" ] || return 0
+    sed -n 's/^[[:space:]]*\[\([^]]*\)\][[:space:]]*$/\1/p' "$CONFIG"
+}
+
+# pick <name|"">: sets P (profile), CONN, GATEWAY, HOST, SOCKS and GW (the
+# command that runs a command as root on the gateway)
+pick() {
+    [ -f "$CONFIG" ] || die "no config yet: run 'fcvpn init', then edit $CONFIG"
+    P=${1:-${FCVPN_PROFILE:-$(cfg "" default || true)}}
+    if [ -z "$P" ]; then
+        [ "$(profiles | wc -l | tr -d ' ')" = 1 ] || die "which profile? set 'default = <name>' in $CONFIG, or name one: $(profiles | paste -sd' ' -)"
+        P=$(profiles)
+    fi
+    profiles | grep -qxF -- "$P" || die "no profile [$P] in $CONFIG (have: $(profiles | paste -sd' ' -))"
+    CONN=$(cfg "$P" connection) || die "[$P] needs 'connection = <name in the FortiClient XML>'"
+    GATEWAY=$(cfg "$P" gateway || echo docker)
+    HOST=$(cfg "$P" host || true)
+    local opts w
+    opts=$(cfg "$P" ssh_opts || true)
+    DOCKER=$(cfg "" docker || echo docker)
+    GW=()
+    case $GATEWAY in
+        docker) GW=("$DOCKER" exec -i "$CONTAINER")
+                SOCKS=$(cfg "$P" socks || echo 127.0.0.1:1080) ;;
+        lima)   GW=(limactl shell --workdir / "$VM" sudo)
+                SOCKS=$(cfg "$P" socks || echo 127.0.0.1:1080) ;;
+        ssh)    [ -n "$HOST" ] || die "[$P] has gateway = ssh but no 'host = user@address'"
+                GW=(ssh)
+                for w in $opts; do
+                    # shellcheck disable=SC2088  # matching a literal ~/ on purpose
+                    case $w in "~/"*) w=$HOME/${w#\~/} ;; esac
+                    GW+=("$w")
+                done
+                GW+=("$HOST")
+                SOCKS=$(cfg "$P" socks || echo "${HOST#*@}:1080") ;;
+        *)      die "[$P] gateway = $GATEWAY: use docker, lima or ssh" ;;
+    esac
+}
+
+# gw <cmd...>: run on the gateway as root. ssh joins its arguments into one
+# remote shell command, so they're quoted for it; docker and limactl pass argv.
+gw() {
+    if [ "$GATEWAY" = ssh ]; then "${GW[@]}" "$(printf '%q ' "$@")"; else "${GW[@]}" "$@"; fi
+}
+
+xmls() {
+    local f
+    for f in "$XML_DIR"/*.xml; do [ -f "$f" ] && echo "$f"; done
+    return 0
+}
+
+# --- gateway lifecycle ------------------------------------------------------
+
+compose() {
+    FCVPN_PROFILES=$XML_DIR FCVPN_SOCKS=$SOCKS \
+        "$DOCKER" compose -f "$ROOT/docker/compose.yml" "$@"
+}
+
+running() {
+    case $GATEWAY in
+        docker) [ "$("$DOCKER" inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = true ] ;;
+        lima)   limactl list -f '{{.Status}}' "$VM" 2>/dev/null | grep -qx Running ;;
+        ssh)    return 0 ;;
+    esac
+}
+
+cmd_up() {
+    case $GATEWAY in
+        docker)
+            mkdir -p "$XML_DIR"
+            compose up -d --build
+            local _
+            for _ in $(seq 1 60); do
+                "$DOCKER" logs "$CONTAINER" 2>&1 | grep -q 'Ready\.' && break
+                sleep 1
+            done
+            "$DOCKER" logs "$CONTAINER" 2>&1 | tail -n 20 ;;
+        lima)
+            "$ROOT/lima/up.sh"
+            cmd_import ;;
+        ssh)
+            gw true || die "can't reach $HOST over ssh"
+            gw sh -c 'command -v fct-status >/dev/null' ||
+                die "$HOST has no gateway installed yet: fcvpn setup $P"
+            echo "$HOST is up (an external gateway: fcvpn doesn't start or stop it)" ;;
+    esac
+}
+
+cmd_down() {
+    case $GATEWAY in
+        docker) compose down --rmi local -v ;;
+        lima)   limactl delete -f "$VM" ;;
+        ssh)    gw fct-disconnect "$CONN" || true
+                echo "disconnected; $HOST itself stays as it is" ;;
+    esac
+}
+
+cmd_import() {
+    local f n=0
+    while IFS= read -r f; do
+        gw fct-import /dev/stdin <"$f" >/dev/null && echo "imported $(basename "$f")"
+        n=$((n + 1))
+    done < <(xmls)
+    [ "$n" -gt 0 ] || die "no FortiClient XML in $XML_DIR (export one from FortiClient: Settings > Backup)"
+    gw fct-list
+}
+
+cmd_setup() {
+    [ "$GATEWAY" = ssh ] || die "setup is for gateway = ssh (docker: fcvpn up; lima: fcvpn up)"
+    gw true || die "can't reach $HOST over ssh"
+    local arch deb="" stage
+    arch=$(gw dpkg --print-architecture) || die "$HOST isn't Debian/Ubuntu (no dpkg)"
+    local f
+    for f in "$ROOT"/vendor/forticlient_vpn_*_"$arch".deb; do [ -f "$f" ] && deb=$f; done
+    [ -n "$deb" ] || die "put forticlient_vpn_<version>_$arch.deb from Fortinet in $ROOT/vendor/ first"
+    stage=$(mktemp -d)
+    mkdir -p "$stage/vendor" "$stage/secrets"
+    cp -R "$ROOT/scripts" "$stage/"
+    cp "$deb" "$stage/vendor/"
+    xmls | while IFS= read -r f; do cp "$f" "$stage/secrets/"; done
+    say "copying the gateway to $HOST:/opt/fct-headless"
+    (cd "$stage" && COPYFILE_DISABLE=1 tar -czf - .) |
+        gw sh -c 'mkdir -p /opt/fct-headless && tar -xzf - -C /opt/fct-headless --no-same-owner && chmod -R go-rwx /opt/fct-headless/secrets'
+    rm -rf "$stage"
+    say "installing (install-gateway.sh)"
+    gw bash /opt/fct-headless/scripts/install-gateway.sh /opt/fct-headless
+}
+
+cmd_connect() {
+    if ! running; then
+        say "the $GATEWAY gateway isn't running: starting it"
+        cmd_up
+    fi
+    "$ROOT/scripts/connect.sh" "$CONN" -- "${GW[@]}"
+    echo "SOCKS5: $SOCKS"
+}
+
+cmd_status() {
+    running || { echo "STATE=down ($GATEWAY gateway not running: fcvpn up $P)"; return 1; }
+    local rc=0
+    gw fct-status || rc=$?
+    echo "PROFILE=$P ($CONN, $GATEWAY)"
+    echo "SOCKS5=$SOCKS"
+    return "$rc"
+}
+
+cmd_shell() {
+    case $GATEWAY in
+        docker) "$DOCKER" exec -it "$CONTAINER" bash ;;
+        lima)   limactl shell --workdir / "$VM" sudo -i ;;
+        ssh)    "${GW[@]:0:${#GW[@]}-1}" -t "$HOST" ;;
+    esac
+}
+
+cmd_list() {
+    [ -f "$CONFIG" ] || die "no config yet: run 'fcvpn init'"
+    local def p
+    def=$(cfg "" default || true)
+    while IFS= read -r p; do
+        printf '%s %-16s %-6s %s\n' "$([ "$p" = "$def" ] && echo '*' || echo ' ')" "$p" \
+            "$(cfg "$p" gateway || echo docker)" "$(cfg "$p" connection || echo '(no connection)')"
+    done < <(profiles)
+}
+
+cmd_init() {
+    [ ! -e "$CONFIG" ] || die "$CONFIG already exists"
+    mkdir -p "$XML_DIR"
+    chmod 700 "$CONFIG_DIR" "$XML_DIR"
+    cp "$ROOT/config.example" "$CONFIG"
+    echo "wrote $CONFIG; put your FortiClient XML export(s) in $XML_DIR/"
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+    connect|disconnect|status|proxy|up|down|import|setup|shell)
+        [ $# -le 1 ] || die "usage: fcvpn $cmd [profile]"
+        pick "${1:-}"
+        case $cmd in
+            disconnect) gw fct-disconnect "$CONN" ;;
+            proxy) echo "$SOCKS" ;;
+            *) "cmd_$cmd" ;;
+        esac ;;
+    list) cmd_list ;;
+    init) cmd_init ;;
+    ""|-h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac
